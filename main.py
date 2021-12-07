@@ -1,7 +1,8 @@
 import copy
 import sys
 import datetime
-
+import scipy.stats
+import matplotlib.pyplot as plt
 from GoogleNews import GoogleNews
 import pandas as pd
 from newspaper import Config
@@ -22,13 +23,12 @@ def main():
     args = sys.argv[1:]
     update_google = args[0]  # True or False
     initial_date = args[1]  # mm/dd/yyyy
-    final_date = args[2]  # mm/dd/yyyy
-    pages = int(args[3])  # int (ex: 5)
-    period = args[4]  # str (ex: '5d')
-    first_time = args[5]  # True or False
+    amount_of_news = int(args[2])
+    period = args[3]  # str (ex: '5d')
+    download_dependencies = args[4]  # True or False
 
-    # Quando for rodar pela primeira vez
-    if first_time == "True":
+    # Se precisar baixar as dependências
+    if download_dependencies == "True":
         nltk.download('wordnet')
         nltk.download('punkt')
         nltk.download('stopwords')
@@ -40,45 +40,50 @@ def main():
 
     if update_google:
         print("Atualizando arquivos por opção")
-        updateData(update_google, starting_date=initial_date, ending_date=final_date, pages=pages)
+        updateData(update_google, starting_date=initial_date, amount_of_news=amount_of_news)
     elif not exists('export_dataframe.csv'):
         print("Dataframe final não encontrado. Atualizando arquivos")
-        updateData(update_google, starting_date=initial_date, ending_date=final_date, pages=pages)
+        updateData(update_google, starting_date=initial_date, amount_of_news=amount_of_news)
 
-    final_df = pd.read_csv('export_dataframe.csv', '&')         # Read DATAFRAME from file
-    final_df.drop('Unnamed: 0', axis='columns', inplace=True)   # Remove extra column from read process
-    preprocess(final_df)                                        # Format DATAFRAME
+    final_df = pd.read_csv('export_dataframe.csv', '&')  # Read DATAFRAME from file
+    final_df.drop('Unnamed: 0', axis='columns', inplace=True)  # Remove extra column from read process
+    preprocess(final_df)  # Format DATAFRAME
     update_sentiment_score(final_df)
     # print_data_frame(final_df)
 
-    get_news(string_to_date(final_df['Date'][180]), string_to_date(final_df['Date'][10]), final_df)
-    quit(1)
-    # FOR
-    # variation = get_variation_from_date(final_df['Date'][130])
-    variation = get_variation_from_date_range(string_to_date(final_df['Date'][220]), string_to_date(final_df['Date'][10]))
+    final_news = get_news(string_to_date(final_df['Date'][0]), string_to_date(final_df['Date'][final_df.__len__() - 1]),
+                          final_df)
+    print("PRINTING NEWWS ")
 
+    pd.set_option("display.max_rows", None, "display.max_columns", None)
+    for news in final_news:
+        print(news['Title'])
+        print(str(news['Score']))
 
-    # print_news_score(final_df)
+    sentiments = []
+    preco_2_dias_atras = []
+    preco_1_dia_atras = []
+    preco_dia_atual = []
+    preco_1_dia_depois = []
+    preco_2_dias_depois = []
 
-    # print(finance_data)
+    for news in final_news:
+        sentiments.append(news['Score'].values[0])
+        variation = get_variation_from_date(news['Date'].values[0])
+        preco_2_dias_atras.append(variation[0])
+        preco_1_dia_atras.append(variation[1])
+        preco_dia_atual.append(variation[2])
+        preco_1_dia_depois.append(variation[3])
+        preco_2_dias_depois.append(variation[4])
 
-def get_variation_from_date_range(first_day, last_day):
-    print("First " + str(first_day))
-    print("last " + str(last_day))
-    first_date = datetime.datetime.strptime(first_day[:10], '%Y-%m-%d')
-    last_date = datetime.datetime.strptime(last_day[:10], '%Y-%m-%d')
-    one_day = datetime.timedelta(1)
-    days = [first_date - one_day - one_day, last_date + one_day + one_day]
-    finance_data = yf.download(tickers='PBR', period='2y', interval='1d')
-    period_closes = finance_data.loc[days[0]:days[1]]['Close']
-    standardized_closes = []
-    for i in range(len(period_closes) - 1):
-        standardized_closes.append(round(period_closes[i + 1] - period_closes[i], 3))
+    print("SENTIMENTS: ")
+    print(sentiments)
 
-    # print(period_closes)
-    #
-    print(standardized_closes)
-    return standardized_closes
+    print(scipy.stats.pearsonr(sentiments, preco_2_dias_atras)[1])
+    print(scipy.stats.pearsonr(sentiments, preco_1_dia_atras)[1])
+    print(scipy.stats.pearsonr(sentiments, preco_dia_atual)[1])
+    print(scipy.stats.pearsonr(sentiments, preco_1_dia_depois)[1])
+    print(scipy.stats.pearsonr(sentiments, preco_2_dias_depois)[1])
 
 
 def get_variation_from_date(news_date):
@@ -88,26 +93,46 @@ def get_variation_from_date(news_date):
 
     finance_data = yf.download(tickers='PBR', period='2y', interval='1d')
     period_closes = finance_data.loc[days[0]:days[1]]['Close']
+    current_date = news_date - one_day - one_day
+    new_period_closes = []
+    for i in range(0, 5):
+        if period_closes.get(key=str(current_date)[:10]) is not None:
+            new_period_closes.append(period_closes.get(key=str(current_date)[:10]))
+        else:
+            if i == 0:
+                aux_current_date = current_date
+                counter = 0
+                while 1:
+                    if counter > 4:
+                        break
+                    if period_closes.get(key=str(aux_current_date)[:10]) is not None:
+                        new_period_closes.append(period_closes.get(key=str(aux_current_date)[:10]))
+                        break
+                    else:
+                        aux_current_date += one_day
+                    counter += 1
+            else:
+                new_period_closes.append(new_period_closes[i - 1])
+        current_date += one_day
+    print(new_period_closes)
     standardized_closes = []
-    for i in range(len(period_closes) - 1):
-        standardized_closes.append(round(period_closes[i + 1] - period_closes[i], 3))
+    for i in range(len(new_period_closes)):
+        if i == 0:
+            standardized_closes.append(0)
+        else:
+            standardized_closes.append(round(new_period_closes[i] - new_period_closes[i - 1], 3))
 
-    # print(period_closes)
-    #
-    # print(standardized_closes)
     return standardized_closes
 
 
 def get_news(initial_date, final_date, dataframe):
     print("DATAS: inicial: " + str(initial_date) + "\nfinal: " + str(final_date))
-    dates = [initial_date]
     news = [get_news_by_date(dataframe, str(initial_date)[:10])]
     current_date = initial_date + datetime.timedelta(1)
     while current_date != final_date + datetime.timedelta(1):
         news.append(get_news_by_date(dataframe, str(current_date)[:10]))
         current_date = current_date + datetime.timedelta(1)
-        print(str(current_date))
-    return news                                           # Return a list of dataframes
+    return news  # Return a list of dataframes
 
 
 def get_news_by_date(dataframe, date):
@@ -123,19 +148,23 @@ def string_to_date(date_string):
     return datetime.datetime.strptime(date_string[:10], '%Y-%m-%d')
 
 
+def string_to_date_google(date_string):
+    replaced = date_string.replace('/', '-')
+    return datetime.datetime.strptime(replaced, '%m-%d-%Y')
+
+
+def date_to_google_news_string(date):
+    new_date = str(date)[5:7] + '/' + str(date)[8:10] + '/' + str(date)[0:4]
+    return str(new_date)[:10]
+
+
 def update_sentiment_score(data_base):
     database_sentiment = set_database_sentiment()
 
-    score_list = []
-    for i in data_base['Article']:
-        score_list.append(evaluate_sentiment(i, database_sentiment))
     max_value = 10
     min_value = -10
-
-    x = 0
-    for j in data_base['Article']:
-        data_base['Score'][x] = scale(score_list[x], (min_value, max_value), (-10, 10))
-        x = x + 1
+    for i in range(data_base['Article'].__len__()):
+        data_base['Score'][i] = scale(evaluate_sentiment(data_base['Article'][i], database_sentiment), (-30, 30), (min_value, max_value))
 
 
 def print_news_score(news_df):
@@ -151,17 +180,18 @@ def print_data_frame(dataframe):
 
 
 def scale(value, current_limits, desired_range):
-    return ((value - current_limits[0]) / (current_limits[1] - current_limits[0])) * (desired_range[1] - desired_range[0]) + desired_range[0]
+    return ((value - current_limits[0]) / (current_limits[1] - current_limits[0])) * (
+                desired_range[1] - desired_range[0]) + desired_range[0]
 
 
-def updateData(update_google, starting_date, ending_date, pages):
+def updateData(update_google, starting_date, amount_of_news):
     print("Atualizando dados!")
     if update_google:
         print("Atualizando google por escolha")
-        updateGoogle(starting_date, ending_date, pages)
+        get_daily_google_news_by_period(starting_date, amount_of_news)
     elif not exists('google_news_df.csv'):
         print("Arquivo com noticias do google nao existe, criando novo arquivo")
-        updateGoogle(starting_date, ending_date, pages)
+        get_daily_google_news_by_period(starting_date, amount_of_news)
 
     google_news_dataframe = pd.read_csv(filepath_or_buffer="google_news_df.csv",
                                         sep='&')  # Lê o arquivo com as notícias do google
@@ -183,10 +213,8 @@ def updateData(update_google, starting_date, ending_date, pages):
         article.download()
         try:
             article.parse()
-
         except:
             continue
-
         article.nlp()
         dict['Date'] = str(google_news_dataframe['datetime'][ind])[:10]
         dict['Media'] = google_news_dataframe['media'][ind]
@@ -199,18 +227,28 @@ def updateData(update_google, starting_date, ending_date, pages):
     news_df.to_csv(path_or_buf='export_dataframe.csv', sep='&')  # Exporta para um arquivo com as noticias completas
 
 
-def updateGoogle(starting_date, ending_date, pages):
-    google_news = GoogleNews(start=starting_date, end=ending_date)
-    google_news.setlang('pt')
-    google_news.search('Petrobras')
-    print("Recuperando notícias atraves da API do Google News...")
-    for i in range(2, pages):
-        google_news.getpage(i)
+def get_daily_google_news_by_period(starting_date, amount_of_news):
+    current_date = starting_date
+    results = []
+    while amount_of_news > 0:
+        google_news = GoogleNews(start=current_date, end=current_date)
+        google_news.setlang('pt')
+        google_news.search('Petrobras')
+        print("Recuperando UMA notícia atraves da API do Google News... Data: " + str(current_date))
+        google_news.getpage(0)
         result = google_news.result()
-        df = pd.DataFrame(result)
-        print("Noticias da pagina " + str(i) + " extraidas.")
+        results = results + result
+        print("Noticia do dia " + str(current_date) + " extraida!")
 
-    pd.set_option("display.max_rows", None, "display.max_columns", None)  # Altera a visualização do dataframe
+        print("Results: ")
+        print(results)
+        current_date = string_to_date_google(current_date) + datetime.timedelta(1)
+        current_date = date_to_google_news_string(current_date)
+        amount_of_news -= 1
+
+    df = pd.DataFrame(results)
+    print("DATAFRAME: ")
+    print(df)
     df.to_csv(path_or_buf='google_news_df.csv', sep='&')  # Cria um arquivo com as noticias do google
 
 
@@ -287,7 +325,6 @@ def evaluate_sentiment(text, database_sentiment):
             score = score + int(database_sentiment[word])
             num_iterado = num_iterado + 1
 
-    # print( "Numero de palavras: " + str(num_palavras) + "  Numero iterado: " + str(num_iterado))
     return score
 
 
